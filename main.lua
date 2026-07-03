@@ -50,6 +50,7 @@ local DEFAULT_SETTINGS = {
     left_template = "{title}",
     right_template = "{battery}",
     separator = "-",
+    auto_update_time = true,
     font_face = "ffont",
     font_size = nil,
     font_bold = nil,
@@ -66,6 +67,7 @@ local patch_installed = false
 local menu_patch_installed = false
 local header_paint_error_logged = false
 local refreshReader
+local refreshHeader
 local applyHeaderMargin
 
 local TEMPLATE_TOKENS = {
@@ -314,6 +316,21 @@ local function hasHeaderContent(settings)
     return tostring(settings.left_template or "") ~= ""
         or tostring(settings.center_template or "") ~= ""
         or tostring(settings.right_template or "") ~= ""
+end
+
+local function templateUsesToken(template, token_key)
+    for key in tostring(template or ""):gmatch("{([%w_]+)}") do
+        if key == token_key then
+            return true
+        end
+    end
+    return false
+end
+
+local function settingsUseTime(settings)
+    return templateUsesToken(settings.left_template, "time")
+        or templateUsesToken(settings.center_template, "time")
+        or templateUsesToken(settings.right_template, "time")
 end
 
 local function getSegmentHeight(segment, face, font_size)
@@ -702,6 +719,35 @@ refreshReader = function()
     UIManager:setDirty(nil, "ui")
 end
 
+refreshHeader = function(ui)
+    if not ui or not ui.view then
+        refreshReader()
+        return
+    end
+
+    local settings = getEffectiveSettings()
+    if not settings.enabled or not hasHeaderContent(settings) then
+        return
+    end
+
+    local ok_height, header_height = pcall(getHeaderReservedHeight, settings, ui.view, 0)
+    if not ok_height then
+        logger.warn("ReaderHeader: failed to calculate header refresh region:", header_height)
+        refreshReader()
+        return
+    end
+    if header_height <= 0 then
+        return
+    end
+
+    UIManager:setDirty(ui, "ui", Geom:new{
+        x = 0,
+        y = 0,
+        w = Screen:getWidth(),
+        h = header_height,
+    })
+end
+
 templateKeyForSlot = function(slot)
     return slot .. "_template"
 end
@@ -875,6 +921,35 @@ local function getFontSizeMenu(plugin)
     return items
 end
 
+function ReaderHeader:shouldAutoUpdateTime()
+    local settings = getEffectiveSettings()
+    return settings.enabled and settings.auto_update_time and settingsUseTime(settings)
+        and self.ui and self.ui.view and self.ui.view.render_mode == nil
+end
+
+function ReaderHeader:unscheduleTimeRefresh()
+    if self._time_refresh_callback then
+        UIManager:unschedule(self._time_refresh_callback)
+        self._time_refresh_callback = nil
+    end
+end
+
+function ReaderHeader:scheduleTimeRefresh()
+    self:unscheduleTimeRefresh()
+    if not self:shouldAutoUpdateTime() then
+        return
+    end
+
+    self._time_refresh_callback = function()
+        self._time_refresh_callback = nil
+        if self:shouldAutoUpdateTime() then
+            refreshHeader(self.ui)
+            self:scheduleTimeRefresh()
+        end
+    end
+    UIManager:scheduleIn(60 - (os.time() % 60), self._time_refresh_callback)
+end
+
 function ReaderHeader:init()
     installPaintPatch()
     installStatusBarMenuPatch(self)
@@ -882,6 +957,7 @@ function ReaderHeader:init()
         self.ui.menu:registerToMainMenu(self)
         self._menu_registered = true
     end
+    self:scheduleTimeRefresh()
 end
 
 function ReaderHeader:onReaderReady()
@@ -891,6 +967,7 @@ function ReaderHeader:onReaderReady()
         self.ui.menu:registerToMainMenu(self)
         self._menu_registered = true
     end
+    self:scheduleTimeRefresh()
 end
 
 function ReaderHeader:configureSlotItems(title, slot, touchmenu_instance)
@@ -909,6 +986,7 @@ function ReaderHeader:configureSlotItems(title, slot, touchmenu_instance)
             saveSetting(key, template)
             saveSetting(bold_key, tokenSetToTemplate(bold_set, template))
             refreshReaderLayout(self.ui, true)
+            self:scheduleTimeRefresh()
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end,
     }
@@ -923,6 +1001,7 @@ function ReaderHeader:resetSettings()
         ok_callback = function()
             G_reader_settings:saveSetting("reader_header", copyDefaults())
             refreshReaderLayout(self.ui, true)
+            self:scheduleTimeRefresh()
         end,
     }
     UIManager:show(confirm_box)
@@ -931,7 +1010,13 @@ end
 function ReaderHeader:saveAndRefresh(key, value, touchmenu_instance)
     saveSetting(key, value)
     refreshReaderLayout(self.ui, LAYOUT_KEYS[key] == true)
+    self:scheduleTimeRefresh()
     if touchmenu_instance then touchmenu_instance:updateItems() end
+end
+
+function ReaderHeader:free(full)
+    self:unscheduleTimeRefresh()
+    WidgetContainer.free(self, full)
 end
 
 function ReaderHeader:onPreRenderDocument()
@@ -1029,6 +1114,15 @@ function ReaderHeader:getHeaderMenuTable()
                 end,
                 callback = function(touchmenu_instance)
                     self:saveAndRefresh("hide_wifi_disconnected", not getSettings().hide_wifi_disconnected, touchmenu_instance)
+                end,
+            },
+            {
+                text = _("Auto-update time"),
+                checked_func = function()
+                    return getSettings().auto_update_time
+                end,
+                callback = function(touchmenu_instance)
+                    self:saveAndRefresh("auto_update_time", not getSettings().auto_update_time, touchmenu_instance)
                 end,
             },
             {

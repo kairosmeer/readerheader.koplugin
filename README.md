@@ -54,6 +54,8 @@ The **Header** menu includes these options:
 - **Bold by default** toggles the default bold style for header items.
 - **Hide Wi-Fi when disconnected** hides the wifi item when Wi-Fi is off or
   unavailable. When disabled, Wi-Fi off is shown with KOReader's off icon.
+- **Auto-update time** refreshes the header once per minute only when a slot
+  shows the `time` item, so the time changes without requiring a page turn.
 - **Top padding** changes the space above the header.
 - **Book text padding** changes the extra space below the header. **None** keeps
   the book text as close as possible while still reserving enough room for the
@@ -94,6 +96,7 @@ settings inherit from KOReader's status bar unless you override them.
 - Bold by default: inherited from KOReader's status bar, or `false`
 - Top padding: `small`
 - Hide Wi-Fi when disconnected: `false`
+- Auto-update time: `true`
 - Book text padding: `none`
 - Use book margins: `true`
 - Fixed margin: `large`
