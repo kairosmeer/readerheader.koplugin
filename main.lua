@@ -725,6 +725,12 @@ refreshHeader = function(ui)
         return
     end
 
+    local reader_dialog = ui.view.dialog or ui.dialog
+    if not reader_dialog then
+        refreshReader()
+        return
+    end
+
     local settings = getEffectiveSettings()
     if not settings.enabled or not hasHeaderContent(settings) then
         return
@@ -740,7 +746,7 @@ refreshHeader = function(ui)
         return
     end
 
-    UIManager:setDirty(ui, "ui", Geom:new{
+    UIManager:setDirty(reader_dialog, "ui", Geom:new{
         x = 0,
         y = 0,
         w = Screen:getWidth(),
